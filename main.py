@@ -81,7 +81,7 @@ async def handle_callback(request: Request):
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[TextMessage(text=event.message.text)]
+                messages=[TextMessage(text=f'You just typed{event.message.text}')]
             )
         )
 
