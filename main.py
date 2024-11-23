@@ -14,7 +14,7 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
-from linebot.v3.messaging import FlexSendMessage  # Bu satır eklendi
+from linebot.v3.messaging import FlexSendMessage  # Buradaki FlexSendMessage doğru sınıf
 
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
@@ -127,7 +127,7 @@ async def handle_callback(request: Request):
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[FlexSendMessage(alt_text="Haber Başlıkları", contents=flex_message)]
+                messages=[FlexSendMessage(alt_text="Haber Başlıkları", contents=flex_message)]  # FlexSendMessage kullanıyoruz
             )
         )
 
