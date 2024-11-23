@@ -93,16 +93,21 @@ async def handle_callback(request: Request):
         if not isinstance(event.message, TextMessageContent):
             continue
 
-        # Kullanıcı mesaj gönderdiğinde haber içeriğini alıyoruz
-        news_content, article_image_url = get_news()
-        
+        # Kullanıcı mesaj gönderdiğinde haber içeriğini, başlık ve görseli alıyoruz
+        news_content, article_image_url, article_title = get_news()
+
+        # İlk olarak başlık ve resmin URL'sini gönderiyoruz
         await line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"{article_title}"),
-                                  TextMessage(text=f"Resim: {article_image_url}")]
-                    )
-                )
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    TextMessage(text=f"{article_title}"),
+                    TextMessage(text=f"Resim: {article_image_url}")
+                ]
+            )
+        )
+
+        # Ardından haberin içeriğini gönderiyoruz
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
