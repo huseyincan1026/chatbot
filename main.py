@@ -1,119 +1,111 @@
 import os
 import sys
-import requests
+import httpx
 from bs4 import BeautifulSoup
 from fastapi import Request, FastAPI, HTTPException
 from linebot.v3.webhook import WebhookParser
 from linebot.v3.messaging import (
-AsyncApiClient,
-AsyncMessagingApi,
-Configuration,
-ReplyMessageRequest,
-TextMessage
+    AsyncApiClient,
+    AsyncMessagingApi,
+    Configuration,
+    ReplyMessageRequest,
+    TextMessage,
+    ImageMessage  # Tekrar edilen importu kaldırdım
 )
-from linebot.v3.messaging import ImageMessage
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
-
-
 
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
 channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', None)
 if channel_secret is None:
-print('LINE_CHANNEL_SECRET çevresel değişkenini belirtin.')
-sys.exit(1)
+    print('LINE_CHANNEL_SECRET çevresel değişkenini belirtin.')
+    sys.exit(1)
 if channel_access_token is None:
-print('LINE_CHANNEL_ACCESS_TOKEN çevresel değişkenini belirtin.')
-sys.exit(1)
+    print('LINE_CHANNEL_ACCESS_TOKEN çevresel değişkenini belirtin.')
+    sys.exit(1)
 
 configuration = Configuration(
-access_token=channel_access_token
+    access_token=channel_access_token
 )
-
 
 app = FastAPI()
 async_api_client = AsyncApiClient(configuration)
 line_bot_api = AsyncMessagingApi(async_api_client)
 parser = WebhookParser(channel_secret)
 
+# Haberleri çekmek için asenkron fonksiyon
+async def get_news():
+    url = 'https://newsapi.org/v2/top-headlines'  # News API endpoint
+    params = {
+        'sources': 'bbc-news',  # BBC News kaynağını kullanıyoruz
+        'apiKey': '0d768d83e4e74f1b9bfc7ea82c967b75',  # API anahtarınızı buraya ekleyin
+        'pageSize': 5  # 5 haber alıyoruz
+    }
 
-# Haberleri çekmek için fonksiyon
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, params=params)
+    data = response.json()
 
-def get_news():
-url = 'https://newsapi.org/v2/top-headlines'  # News API endpoint
-params = {
-    'sources': 'bbc-news',  # BBC News kaynağını kullanıyoruz
-    'apiKey': '0d768d83e4e74f1b9bfc7ea82c967b75',  # API anahtarınızı buraya ekleyin
-    'pageSize': 5  # 5 haber alıyoruz
-}
+    article_title = data['articles'][0]['title']
+    article_image_url = data['articles'][0]['urlToImage']
 
-response = requests.get(url, params=params)
-data = response.json()
+    links = []
+    for link in data['articles']:
+        links.append(link['url'])
 
-article_title = data['articles'][0]['title']
-article_image_url = data['articles'][0]['urlToImage']
+    # İlk haberin içeriğini çekiyoruz
+    async with httpx.AsyncClient() as client:
+        r = await client.get(links[0])
+    soup = BeautifulSoup(r.text, 'lxml')
 
-links = []
-for link in data['articles']:
-    links.append(link['url'])
+    # Haber içeriğini alıyoruz
+    content = soup.findAll('div', {'data-component': 'text-block'})
+    article_text = ""
+    for i in content:
+        article_text += i.get_text() + "\n"
 
-# İlk haberin içeriğini çekiyoruz
-r = requests.get(links[0])
-soup = BeautifulSoup(r.text, 'lxml')
-
-# Haber içeriğini alıyoruz
-content = soup.findAll('div', {'data-component': 'text-block'})
-article_text = ""
-for i in content: 
-    article_text += i.get_text() + "\n"
-
-return article_text, article_image_url, article_title
+    return article_text, article_image_url, article_title
 
 @app.get("/")
 async def read_root():
-return {"message": "LINE bot'a hoş geldiniz!"}
-
-
-from linebot.v3.messaging import ImageMessage
+    return {"message": "LINE bot'a hoş geldiniz!"}
 
 @app.post("/callback")
 async def handle_callback(request: Request):
-signature = request.headers['X-Line-Signature']
+    signature = request.headers['X-Line-Signature']
 
-# Request gövdesini metin olarak alıyoruz
-body = await request.body()
-body = body.decode()
+    # Request gövdesini metin olarak alıyoruz
+    body = await request.body()
+    body = body.decode()
 
-try:
-    events = parser.parse(body, signature)
-except InvalidSignatureError:
-    raise HTTPException(status_code=400, detail="Geçersiz imza")
+    try:
+        events = parser.parse(body, signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Geçersiz imza")
 
-for event in events:
-    if not isinstance(event, MessageEvent):
-        continue
-    if not isinstance(event.message, TextMessageContent):
-        continue
+    for event in events:
+        if not isinstance(event, MessageEvent):
+            continue
+        if not isinstance(event.message, TextMessageContent):
+            continue
 
-    # Kullanıcı mesaj gönderdiğinde haber içeriğini, başlık ve görseli alıyoruz
-    news_content, article_image_url, article_title = get_news()
+        # Kullanıcı mesaj gönderdiğinde haber içeriğini, başlık ve görseli alıyoruz
+        news_content, article_image_url, article_title = await get_news()
 
-    # Başlık, resim ve haber içeriğini tek bir reply_message ile gönderiyoruz
-    await line_bot_api.reply_message(
-        ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[
-                TextMessage(text=f"{article_title}"),
-                ImageMessage(
-                    original_content_url=article_image_url,  # Resmin tam boyutlu URL'si
-                    preview_image_url=article_image_url  # Resmin küçük boyutlu önizlemesi
-                ),
-                TextMessage(text=f"İşte son haber:\n{news_content}")
-            ]
+        # Başlık, resim ve haber içeriğini tek bir reply_message ile gönderiyoruz
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    TextMessage(text=f"{article_title}"),
+                    ImageMessage(
+                        original_content_url=article_image_url,  # Resmin tam boyutlu URL'si
+                        preview_image_url=article_image_url  # Resmin küçük boyutlu önizlemesi
+                    ),
+                    TextMessage(text=f"İşte son haber:\n{news_content}")
+                ]
+            )
         )
-    )
 
-return 'OK'
-
-
+    return 'OK'
