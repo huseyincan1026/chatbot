@@ -96,23 +96,17 @@ async def handle_callback(request: Request):
         # Kullanıcı mesaj gönderdiğinde haber içeriğini, başlık ve görseli alıyoruz
         news_content, article_image_url, article_title = get_news()
 
-        # İlk olarak başlık ve resmin URL'sini gönderiyoruz
+        # Başlık, resim ve haber içeriğini tek bir reply_message ile gönderiyoruz
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
                 messages=[
                     TextMessage(text=f"{article_title}"),
-                    TextMessage(text=f"Resim: {article_image_url}")
+                    TextMessage(text=f"Resim: {article_image_url}"),
+                    TextMessage(text=f"İşte son haber:\n{news_content}")
                 ]
             )
         )
 
-        # Ardından haberin içeriğini gönderiyoruz
-        await line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=f"İşte son haber:\n{news_content}")]
-            )
-        )
-
     return 'OK'
+
