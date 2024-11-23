@@ -118,4 +118,40 @@ async def handle_callback(request: Request):
                     "contents": [{
                         "type": "button",
                         "action": button
-                    } for button in
+                    } for button in buttons]
+                }
+            }]
+        }
+
+        # Başlıkları gönderiyoruz
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[FlexSendMessage(alt_text="Haber Başlıkları", contents=flex_message)]
+            )
+        )
+
+        # Kullanıcı bir başlık seçtiğinde, ilgili haberin detaylarını gönderiyoruz
+        selected_index = int(event.message.text.split(": ")[1])  # 'Seçilen haber: 1' formatında alıyoruz
+
+        # Seçilen haberin detaylarını alıyoruz
+        selected_headline = headlines[selected_index]
+        selected_content = contents[selected_index]
+        selected_image_url = image_urls[selected_index]
+
+        # Detayları kullanıcıya gönderiyoruz
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    TextMessage(text=selected_headline),
+                    ImageMessage(
+                        original_content_url=selected_image_url,
+                        preview_image_url=selected_image_url
+                    ),
+                    TextMessage(text=f"İşte detaylar:\n{selected_content}")
+                ]
+            )
+        )
+
+    return 'OK'
