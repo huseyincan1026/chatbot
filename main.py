@@ -50,6 +50,7 @@ def get_news():
     response = requests.get(url, params=params)
     data = response.json()
     
+    article_title = data['articles'][0]['title']
     article_image_url = data['articles'][0]['urlToImage']
     
     links = []
@@ -66,7 +67,7 @@ def get_news():
     for i in content: 
         article_text += i.get_text() + "\n"
     
-    return article_text, article_image_url
+    return article_text, article_image_url, article_title
 
 @app.get("/")
 async def read_root():
