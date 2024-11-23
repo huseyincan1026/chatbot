@@ -14,6 +14,8 @@ from linebot.v3.messaging import (
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
+
+
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
 channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', None)
@@ -28,12 +30,15 @@ configuration = Configuration(
     access_token=channel_access_token
 )
 
+
 app = FastAPI()
 async_api_client = AsyncApiClient(configuration)
 line_bot_api = AsyncMessagingApi(async_api_client)
 parser = WebhookParser(channel_secret)
 
+
 # Haberleri çekmek için fonksiyon
+
 def get_news():
     url = 'https://newsapi.org/v2/top-headlines'  # News API endpoint
     params = {
@@ -44,6 +49,8 @@ def get_news():
 
     response = requests.get(url, params=params)
     data = response.json()
+    
+    article_image_url = data['articles'][0]['urlToImage']
     
     links = []
     for link in data['articles']:
@@ -59,11 +66,12 @@ def get_news():
     for i in content: 
         article_text += i.get_text() + "\n"
     
-    return article_text
+    return article_text, article_image_url
 
 @app.get("/")
 async def read_root():
     return {"message": "LINE bot'a hoş geldiniz!"}
+
 
 @app.post("/callback")
 async def handle_callback(request: Request):
@@ -85,8 +93,15 @@ async def handle_callback(request: Request):
             continue
 
         # Kullanıcı mesaj gönderdiğinde haber içeriğini alıyoruz
-        news_content = get_news()
-
+        news_content, article_image_url = get_news()
+        
+        await line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"{article_title}"),
+                                  TextMessage(text=f"Resim: {article_image_url}")]
+                    )
+                )
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
