@@ -10,8 +10,8 @@ AsyncMessagingApi,
 Configuration,
 ReplyMessageRequest,
 TextMessage
-ImageMessage
 )
+from linebot.v3.messaging import ImageMessage
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
