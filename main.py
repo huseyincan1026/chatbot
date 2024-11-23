@@ -10,7 +10,7 @@ from linebot.v3.messaging import (
     Configuration,
     ReplyMessageRequest,
     TextMessage,
-    ImageMessage  # Tekrar edilen importu kaldırdım
+    ImageMessage
 )
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
@@ -40,32 +40,37 @@ async def get_news():
     params = {
         'sources': 'bbc-news',  # BBC News kaynağını kullanıyoruz
         'apiKey': '0d768d83e4e74f1b9bfc7ea82c967b75',  # API anahtarınızı buraya ekleyin
-        'pageSize': 5  # 5 haber alıyoruz
+        'pageSize': 10  # 10 haber alıyoruz
     }
 
     async with httpx.AsyncClient() as client:
         response = await client.get(url, params=params)
     data = response.json()
 
-    article_title = data['articles'][0]['title']
-    article_image_url = data['articles'][0]['urlToImage']
-
+    # Haber başlıkları, içerikler ve görselleri alıyoruz
+    headlines = []
     links = []
-    for link in data['articles']:
-        links.append(link['url'])
+    image_urls = []
+    contents = []
 
-    # İlk haberin içeriğini çekiyoruz
-    async with httpx.AsyncClient() as client:
-        r = await client.get(links[0])
-    soup = BeautifulSoup(r.text, 'lxml')
+    for article in data['articles']:
+        headlines.append(article['title'])
+        links.append(article['url'])
+        image_urls.append(article['urlToImage'])
 
-    # Haber içeriğini alıyoruz
-    content = soup.findAll('div', {'data-component': 'text-block'})
-    article_text = ""
-    for i in content:
-        article_text += i.get_text() + "\n"
+        # Her bir haberin içeriğini çekiyoruz
+        async with httpx.AsyncClient() as client:
+            r = await client.get(article['url'])
+        soup = BeautifulSoup(r.text, 'lxml')
 
-    return article_text, article_image_url, article_title
+        content = soup.findAll('div', {'data-component': 'text-block'})
+        article_text = ""
+        for i in content:
+            article_text += i.get_text() + "\n"
+
+        contents.append(article_text)
+
+    return headlines, links, image_urls, contents
 
 @app.get("/")
 async def read_root():
@@ -74,8 +79,6 @@ async def read_root():
 @app.post("/callback")
 async def handle_callback(request: Request):
     signature = request.headers['X-Line-Signature']
-
-    # Request gövdesini metin olarak alıyoruz
     body = await request.body()
     body = body.decode()
 
@@ -90,20 +93,62 @@ async def handle_callback(request: Request):
         if not isinstance(event.message, TextMessageContent):
             continue
 
-        # Kullanıcı mesaj gönderdiğinde haber içeriğini, başlık ve görseli alıyoruz
-        news_content, article_image_url, article_title = await get_news()
+        # Haber başlıklarını alıyoruz
+        headlines, links, image_urls, contents = await get_news()
 
-        # Başlık, resim ve haber içeriğini tek bir reply_message ile gönderiyoruz
+        # Başlıkları liste olarak göndermek
+        buttons = []
+        for i, headline in enumerate(headlines):
+            buttons.append({
+                "type": "message",
+                "label": headline,
+                "text": f"Seçilen haber: {i}",  # Seçilen haberin index değeri
+                "data": str(i)  # Index'i veri olarak gönderiyoruz
+            })
+
+        # FlexMessage ile başlıkları gönderiyoruz
+        flex_message = {
+            "type": "carousel",
+            "contents": [{
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [{
+                        "type": "button",
+                        "action": button
+                    } for button in buttons]
+                }
+            }]
+        }
+
+        # Başlıkları gönderiyoruz
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[FlexMessage(alt_text="Haber Başlıkları", contents=flex_message)]
+            )
+        )
+
+        # Kullanıcı bir başlık seçtiğinde, ilgili haberin detaylarını gönderiyoruz
+        selected_index = int(event.message.text.split(": ")[1])  # 'Seçilen haber: 1' formatında alıyoruz
+
+        # Seçilen haberin detaylarını alıyoruz
+        selected_headline = headlines[selected_index]
+        selected_content = contents[selected_index]
+        selected_image_url = image_urls[selected_index]
+
+        # Detayları kullanıcıya gönderiyoruz
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
                 messages=[
-                    TextMessage(text=f"{article_title}"),
+                    TextMessage(text=selected_headline),
                     ImageMessage(
-                        original_content_url=article_image_url,  # Resmin tam boyutlu URL'si
-                        preview_image_url=article_image_url  # Resmin küçük boyutlu önizlemesi
+                        original_content_url=selected_image_url,
+                        preview_image_url=selected_image_url
                     ),
-                    TextMessage(text=f"İşte son haber:\n{news_content}")
+                    TextMessage(text=f"İşte detaylar:\n{selected_content}")
                 ]
             )
         )
