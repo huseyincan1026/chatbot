@@ -34,10 +34,6 @@ from linebot.v3.webhooks import (
 )
 
 
-@app.get("/")
-async def read_root():
-    return {"message": "Welcome to the LINE bot!"}
-
 
 # get channel_secret and channel_access_token from your environment variable
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
@@ -58,6 +54,10 @@ async_api_client = AsyncApiClient(configuration)
 line_bot_api = AsyncMessagingApi(async_api_client)
 parser = WebhookParser(channel_secret)
 
+
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the LINE bot!"}
 
 @app.post("/callback")
 async def handle_callback(request: Request):
