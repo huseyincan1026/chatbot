@@ -2,16 +2,17 @@ import os
 import sys
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import Request, FastAPI, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from linebot.v3.webhook import WebhookParser
 from linebot.v3.messaging import (
     AsyncApiClient,
     AsyncMessagingApi,
     Configuration,
-    ReplyMessageRequest,
+    ReplyMessageRequest
 )
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.models import FlexSendMessage, MessageEvent, TextMessageContent
+from linebot.v3.webhooks.models.message_content import MessageContent
+from linebot.models import FlexSendMessage
 
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
@@ -45,31 +46,30 @@ async def get_news():
         response = await client.get(url, params=params)
     data = response.json()
 
+    # Haber başlıkları, içerikler ve görselleri alıyoruz
     headlines = []
     links = []
     image_urls = []
     contents = []
 
-    # Paralel olarak içerikleri çekmek için
-    tasks = []
     for article in data['articles']:
         headlines.append(article['title'])
         links.append(article['url'])
         image_urls.append(article['urlToImage'])
-        tasks.append(fetch_article_content(article['url']))
 
-    contents = await asyncio.gather(*tasks)
+        # Her bir haberin içeriğini çekiyoruz
+        async with httpx.AsyncClient() as client:
+            r = await client.get(article['url'])
+        soup = BeautifulSoup(r.text, 'lxml')
+
+        content = soup.findAll('div', {'data-component': 'text-block'})
+        article_text = ""
+        for i in content:
+            article_text += i.get_text() + "\n"
+
+        contents.append(article_text)
+
     return headlines, links, image_urls, contents
-
-async def fetch_article_content(url):
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
-    soup = BeautifulSoup(r.text, 'lxml')
-    content = soup.findAll('div', {'data-component': 'text-block'})
-    article_text = ""
-    for i in content:
-        article_text += i.get_text() + "\n"
-    return article_text
 
 @app.get("/")
 async def read_root():
@@ -89,7 +89,7 @@ async def handle_callback(request: Request):
     for event in events:
         if not isinstance(event, MessageEvent):
             continue
-        if not isinstance(event.message, TextMessageContent):
+        if not isinstance(event.message, MessageContent):
             continue
 
         # Haber başlıklarını ve detaylarını alıyoruz
