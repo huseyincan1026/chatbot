@@ -10,11 +10,10 @@ from linebot.v3.messaging import (
     Configuration,
     ReplyMessageRequest,
     TextMessage,
-    ImageMessage
+    FlexSendMessage
 )
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
-from linebot.v3.messaging import FlexSendMessage  # Buradaki FlexSendMessage doğru sınıf
 
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
@@ -55,6 +54,9 @@ async def get_news():
     contents = []
 
     for article in data['articles']:
+        # Eksik veri kontrolü
+        if not article['title'] or not article['url'] or not article['urlToImage']:
+            continue
         headlines.append(article['title'])
         links.append(article['url'])
         image_urls.append(article['urlToImage'])
@@ -166,18 +168,24 @@ async def handle_callback(request: Request):
             "contents": bubbles
         }
 
+        # Flex Message yapısını kontrol et
+        import json
+        print(json.dumps(carousel, indent=2))  # Gönderilen Flex mesajını kontrol etmek için
+
         # Flex Message gönderme
-        await line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[
-                    FlexSendMessage(
-                        alt_text="Haber Başlıkları",
-                        contents=carousel
-                    )
-                ]
+        try:
+            await line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[
+                        FlexSendMessage(
+                            alt_text="Haber Başlıkları",
+                            contents=carousel
+                        )
+                    ]
+                )
             )
-        )
+        except Exception as e:
+            print(f"Flex Message gönderiminde hata: {e}")
 
     return 'OK'
-
