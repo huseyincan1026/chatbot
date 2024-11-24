@@ -1,292 +1,182 @@
-# -*- coding: utf-8 -*-
-
-#  Licensed under the Apache License, Version 2.0 (the 'License'); you may
-#  not use this file except in compliance with the License. You may obtain
-#  a copy of the License at
-#
-#       https://www.apache.org/licenses/LICENSE-2.0
-#
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an 'AS IS' BASIS, WITHOUT
-#  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-#  License for the specific language governing permissions and limitations
-#  under the License.
-
-from __future__ import unicode_literals, absolute_import
-
-import unittest
-
-from linebot.models import (
-    FlexSendMessage,
-    BlockStyle,
-    BubbleStyle,
-    BubbleContainer,
-    CarouselContainer,
-    BoxComponent,
-    TextComponent,
-    SeparatorComponent,
-    ImageComponent,
-    ButtonComponent,
-    FillerComponent,
-    IconComponent,
-    SpanComponent,
-    VideoComponent,
-    URIAction,
-    LinearGradientBackground,
+import os
+import sys
+import httpx
+from bs4 import BeautifulSoup
+from fastapi import Request, FastAPI, HTTPException
+from linebot.v3.webhook import WebhookParser
+from linebot.v3.messaging import (
+    AsyncApiClient,
+    AsyncMessagingApi,
+    Configuration,
+    ReplyMessageRequest,
+    TextMessage,
+    ImageMessage
 )
-from tests.models.serialize_test_case import SerializeTestCase
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.models import FlexSendMessage  # Buradaki FlexSendMessage doğru sınıf
 
+# Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
+channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
+channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', None)
+if channel_secret is None:
+    print('LINE_CHANNEL_SECRET çevresel değişkenini belirtin.')
+    sys.exit(1)
+if channel_access_token is None:
+    print('LINE_CHANNEL_ACCESS_TOKEN çevresel değişkenini belirtin.')
+    sys.exit(1)
 
-class TestFlexMessage(SerializeTestCase):
-    def test_flex_message(self):
-        arg = {
-            'alt_text': 'this is a flex message',
-            'contents':
-                BubbleContainer(
-                    body=BoxComponent(
-                        layout='vertical',
-                        contents=[
-                            TextComponent(text='hello', wrap=True, max_lines=1),
-                            TextComponent(text='world')
-                        ]
+configuration = Configuration(
+    access_token=channel_access_token
+)
+
+app = FastAPI()
+async_api_client = AsyncApiClient(configuration)
+line_bot_api = AsyncMessagingApi(async_api_client)
+parser = WebhookParser(channel_secret)
+
+# Haberleri çekmek için asenkron fonksiyon
+async def get_news():
+    url = 'https://newsapi.org/v2/top-headlines'  # News API endpoint
+    params = {
+        'sources': 'bbc-news',  # BBC News kaynağını kullanıyoruz
+        'apiKey': '0d768d83e4e74f1b9bfc7ea82c967b75',  # API anahtarınızı buraya ekleyin
+        'pageSize': 10  # 10 haber alıyoruz
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, params=params)
+    data = response.json()
+
+    # Haber başlıkları, içerikler ve görselleri alıyoruz
+    headlines = []
+    links = []
+    image_urls = []
+    contents = []
+
+    for article in data['articles']:
+        headlines.append(article['title'])
+        links.append(article['url'])
+        image_urls.append(article['urlToImage'])
+
+        # Her bir haberin içeriğini çekiyoruz
+        async with httpx.AsyncClient() as client:
+            r = await client.get(article['url'])
+        soup = BeautifulSoup(r.text, 'lxml')
+
+        content = soup.findAll('div', {'data-component': 'text-block'})
+        article_text = ""
+        for i in content:
+            article_text += i.get_text() + "\n"
+
+        contents.append(article_text)
+
+    return headlines, links, image_urls, contents
+
+@app.get("/")
+async def read_root():
+    return {"message": "LINE bot'a hoş geldiniz!"}
+
+@app.post("/callback")
+async def handle_callback(request: Request):
+    signature = request.headers['X-Line-Signature']
+    body = await request.body()
+    body = body.decode()
+
+    try:
+        events = parser.parse(body, signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Geçersiz imza")
+
+    for event in events:
+        if not isinstance(event, MessageEvent):
+            continue
+        if not isinstance(event.message, TextMessageContent):
+            continue
+
+        # Haber başlıklarını ve detaylarını alıyoruz
+        headlines, links, image_urls, contents = await get_news()
+
+        # FlexMessage için haberleri düzenliyoruz
+        bubbles = []
+        for i in range(len(headlines)):
+            bubble = {
+                "type": "bubble",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": f"Haber {i+1}",
+                            "weight": "bold",
+                            "size": "lg",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "hero": {
+                    "type": "image",
+                    "url": image_urls[i],  # Haber görsel URL'si
+                    "size": "full",
+                    "aspect_ratio": "20:13",
+                    "aspect_mode": "cover"
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": headlines[i],  # Haber başlığı
+                            "weight": "bold",
+                            "size": "md",
+                            "wrap": True
+                        },
+                        {
+                            "type": "text",
+                            "text": "Detaylar için düğmeye tıklayın.",
+                            "size": "sm",
+                            "color": "#999999",
+                            "wrap": True
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "uri",
+                                "label": "Haberi Oku",
+                                "uri": links[i]  # Haber bağlantısı
+                            },
+                            "style": "primary"
+                        }
+                    ]
+                }
+            }
+            bubbles.append(bubble)
+
+        # Carousel mesajı oluşturma
+        carousel = {
+            "type": "carousel",
+            "contents": bubbles
+        }
+
+        # Flex Message gönderme
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    FlexSendMessage(
+                        alt_text="Haber Başlıkları",
+                        contents=carousel
                     )
-                )
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.FLEX),
-            FlexSendMessage(**arg).as_json_dict()
-        )
-
-    def test_bubble_container(self):
-        arg = {
-            'header':
-                BoxComponent(layout='vertical',
-                             contents=[TextComponent(text='Header text')]),
-            'body':
-                BoxComponent(layout='vertical',
-                             contents=[TextComponent(text='Body text')]),
-            'footer':
-                BoxComponent(layout='vertical',
-                             contents=[TextComponent(text='Footer text')]),
-            'styles':
-                BubbleStyle(
-                    header=BlockStyle(background_color='#00ffff'),
-                    hero=BlockStyle(background_color='#00ffff',
-                                    separator=True),
-                    footer=BlockStyle(background_color='#00ffff',
-                                      separator=True,
-                                      separator_color='#00ffff')
-                )
-        }
-        heros = [
-            ImageComponent(uri='https://example.com/flex/images/image.jpg'),
-            BoxComponent(layout='vertical',
-                         contents=[TextComponent(text='Body text')]),
-        ]
-        for hero in heros:
-            arg['hero'] = hero
-            self.assertEqual(
-                self.serialize_as_dict(arg, type=self.BUBBLE),
-                BubbleContainer(**arg).as_json_dict()
+                ]
             )
-
-    def test_bubble_style(self):
-        arg = {
-            'header':
-                BlockStyle(background_color='#00ffff'),
-            'hero':
-                BlockStyle(background_color='#00ffff',
-                           separator=True),
-            'footer':
-                BlockStyle(background_color='#00ffff',
-                           separator=True,
-                           separator_color='#00ffff')
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg),
-            BubbleStyle(**arg).as_json_dict()
         )
 
-    def test_block_style(self):
-        arg = {
-            'background_color': '#00ffff',
-            'separator': True,
-            'separator_color': '#000000'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg),
-            BlockStyle(**arg).as_json_dict()
-        )
-
-    def test_carousel_container(self):
-        arg = {
-            'contents': [
-                BubbleContainer(
-                    body=BoxComponent(
-                        layout='vertical',
-                        contents=[TextComponent(text='Hey')]
-                    )
-                ),
-                BubbleContainer(
-                    body=BoxComponent(
-                        layout='vertical',
-                        contents=[TextComponent(text='Foo')]
-                    )
-                ),
-            ]
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.CAROUSEL),
-            CarouselContainer(**arg).as_json_dict()
-        )
-
-    def test_box_component(self):
-        arg = {
-            'layout': 'vertical',
-            'contents': [
-                ImageComponent(url='https://example.com/flex/images/image.jpg'),
-                SeparatorComponent(),
-                TextComponent(text='Text in the box'),
-            ],
-            'background_color': '#00000000',
-            'border_width': 'light',
-            'corner_radius': 'xs',
-            'flex': 2
-        }
-
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.BOX),
-            BoxComponent(**arg).as_json_dict()
-        )
-
-    def test_box_component_with_linear_gradient(self):
-        arg = {
-            'layout': 'vertical',
-            'contents': [],
-            'background_color': '#00000000',
-            'border_width': 'light',
-            'corner_radius': 'xs',
-            'flex': 2,
-            'background': LinearGradientBackground(
-                angle='0deg',
-                start_color='#ff0000',
-                center_color='#0000ff',
-                end_color='#00ff00',
-                center_position='10%'
-            )
-        }
-
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.BOX),
-            BoxComponent(**arg).as_json_dict()
-        )
-
-    def test_button_component(self):
-        arg = {
-            'action':
-                URIAction(label='Tap me',
-                          uri='https://example.com'),
-            'style': 'primary',
-            'color': '#0000ff'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.BUTTON),
-            ButtonComponent(**arg).as_json_dict()
-        )
-
-    def test_filler_component(self):
-        arg = {
-            'flex': 2
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.FILLER),
-            FillerComponent(**arg).as_json_dict()
-        )
-
-    def test_icon_component(self):
-        arg = {
-            'url': 'https://example.com/icon/png/caution.png',
-            'size': 'lg',
-            'aspect_ratio': '1.91:1'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.ICON),
-            IconComponent(**arg).as_json_dict()
-        )
-
-    def test_image_component(self):
-        arg = {
-            'url': 'https://example.com/flex/images/image.jpg',
-            'size': 'full',
-            'animated': False,
-            'aspect_ratio': '1.91:1'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.IMAGE),
-            ImageComponent(**arg).as_json_dict()
-        )
-
-    def test_separator_component(self):
-        arg = {
-            'color': '#000000',
-            'margin': 'xxl'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.SEPARATOR),
-            SeparatorComponent(**arg).as_json_dict()
-        )
-
-    def test_span_component(self):
-        arg = {
-            'type': 'span',
-            'text': '蛙',
-            'size': 'xxl',
-            'weight': 'bold',
-            'style': 'italic',
-            'color': '#4f8f00',
-            'decoration': 'underline'
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.SPAN),
-            SpanComponent(**arg).as_json_dict()
-        )
-
-    def test_video_component(self):
-        arg = {
-            'type': 'video',
-            'url': 'https://example.com/video.mp4',
-            "preview_url": "https://example.com/video_preview.jpg",
-            "alt_content": {
-                "type": "image",
-                "size": "full",
-                "aspect_ratio": "20:13",
-                "aspect_mode": "cover",
-                "animated": False,
-                "url": "https://example.com/image.jpg"
-            },
-            "aspect_ratio": "20:13"
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.VIDEO),
-            VideoComponent(**arg).as_json_dict()
-        )
-
-    def test_text_component(self):
-        arg = {
-            'text': 'Hello, World!',
-            'size': 'xl',
-            'weight': 'bold',
-            'color': '#0000ff',
-            'position': 'relative',
-            'offset_top': '10px',
-            'decoration': 'underline',
-            'max_lines': 2
-        }
-        self.assertEqual(
-            self.serialize_as_dict(arg, type=self.TEXT),
-            TextComponent(**arg).as_json_dict()
-        )
-
-
-if __name__ == '__main__':
-    unittest.main()
+    return 'OK'
