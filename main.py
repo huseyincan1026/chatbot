@@ -1,42 +1,97 @@
-from fastapi import FastAPI, Request
-from line_bot_sdk import LineBotApi, WebhookHandler
-from line_bot_sdk.models import MessageEvent, TextMessage, PostbackEvent
+import os
+import sys
+import requests
+from bs4 import BeautifulSoup
+from fastapi import Request, FastAPI, HTTPException
+from linebot.v3.webhook import WebhookParser
+from linebot.v3.messaging import (
+    AsyncApiClient,
+    AsyncMessagingApi,
+    Configuration,
+    ReplyMessageRequest,
+    TextMessage
+)
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
+
+# Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
+channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
+channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', None)
+if channel_secret is None:
+    print('LINE_CHANNEL_SECRET çevresel değişkenini belirtin.')
+    sys.exit(1)
+if channel_access_token is None:
+    print('LINE_CHANNEL_ACCESS_TOKEN çevresel değişkenini belirtin.')
+    sys.exit(1)
+
+configuration = Configuration(
+    access_token=channel_access_token
+)
 
 app = FastAPI()
+async_api_client = AsyncApiClient(configuration)
+line_bot_api = AsyncMessagingApi(async_api_client)
+parser = WebhookParser(channel_secret)
 
-# LINE bot bilgilerinizi burada doldurun
-line_bot_api = LineBotApi('YOUR_CHANNEL_ACCESS_TOKEN')
-handler = WebhookHandler('YOUR_CHANNEL_SECRET')
+# Haberleri çekmek için fonksiyon
+def get_news():
+    url = 'https://newsapi.org/v2/top-headlines'  # News API endpoint
+    params = {
+        'sources': 'bbc-news',  # BBC News kaynağını kullanıyoruz
+        'apiKey': '0d768d83e4e74f1b9bfc7ea82c967b75',  # API anahtarınızı buraya ekleyin
+        'pageSize': 5  # 5 haber alıyoruz
+    }
+
+    response = requests.get(url, params=params)
+    data = response.json()
+    
+    links = []
+    for link in data['articles']:
+        links.append(link['url'])
+
+    # İlk haberin içeriğini çekiyoruz
+    r = requests.get(links[0])
+    soup = BeautifulSoup(r.text, 'lxml')
+
+    # Haber içeriğini alıyoruz
+    content = soup.findAll('div', {'data-component': 'text-block'})
+    article_text = ""
+    for i in content: 
+        article_text += i.get_text() + "\n"
+    
+    return article_text
+
+@app.get("/")
+async def read_root():
+    return {"message": "LINE bot'a hoş geldiniz!"}
 
 @app.post("/callback")
-async def callback(request: Request):
+async def handle_callback(request: Request):
+    signature = request.headers['X-Line-Signature']
+
+    # Request gövdesini metin olarak alıyoruz
     body = await request.body()
-    signature = request.headers["X-Line-Signature"]
-    handler.handle(body.decode(), signature)
-    return "OK"
+    body = body.decode()
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    # Kullanıcıya seçenekleri sunma
-    buttons_template = TemplateSendMessage(
-        alt_text="Please choose",
-        template=ButtonsTemplate(
-            text="Choose an option:",
-            actions=[
-                PostbackAction(label="Option 1", data="option1"),
-                PostbackAction(label="Option 2", data="option2"),
-                PostbackAction(label="Option 3", data="option3")
-            ]
+    try:
+        events = parser.parse(body, signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Geçersiz imza")
+
+    for event in events:
+        if not isinstance(event, MessageEvent):
+            continue
+        if not isinstance(event.message, TextMessageContent):
+            continue
+
+        # Kullanıcı mesaj gönderdiğinde haber içeriğini alıyoruz
+        news_content = get_news()
+
+        await line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=f"İşte son haber:\n{news_content}")]
+            )
         )
-    )
-    line_bot_api.reply_message(event.reply_token, buttons_template)
 
-@handler.add(PostbackEvent)
-def handle_postback(event):
-    # Kullanıcının seçimine göre mesaj gönder
-    if event.postback.data == "option1":
-        line_bot_api.reply_message(event.reply_token, TextMessage(text="You chose option 1"))
-    elif event.postback.data == "option2":
-        line_bot_api.reply_message(event.reply_token, TextMessage(text="You chose option 2"))
-    elif event.postback.data == "option3":
-        line_bot_api.reply_message(event.reply_token, TextMessage(text="You chose option 3"))
+    return 'OK'
