@@ -166,15 +166,16 @@ async def handle_callback(request: Request):
         }
 
         # Flex Message gönderme
+        flex_message = FlexSendMessage(
+            alt_text="Haber Başlıkları",
+            contents=carousel
+        )
+
+        # ReplyMessageRequest'ı doğru şekilde kullanma
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[
-                    FlexSendMessage(
-                        alt_text="Haber Başlıkları",
-                        contents=carousel
-                    )
-                ]
+                messages=[flex_message]  # Doğru formatta liste gönderiyoruz
             )
         )
 
