@@ -11,6 +11,7 @@ from linebot.v3.messaging import (
     ReplyMessageRequest
 )
 from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.webhooks.models import MessageEvent
 from linebot.v3.webhooks.models.message_content import MessageContent
 from linebot.models import FlexSendMessage
 
