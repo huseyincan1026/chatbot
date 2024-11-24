@@ -94,64 +94,90 @@ async def handle_callback(request: Request):
         if not isinstance(event.message, TextMessageContent):
             continue
 
-        # Haber başlıklarını alıyoruz
+        # Haber başlıklarını ve detaylarını alıyoruz
         headlines, links, image_urls, contents = await get_news()
 
-        # Başlıkları liste olarak göndermek
-        buttons = []
-        for i, headline in enumerate(headlines):
-            buttons.append({
-                "type": "message",
-                "label": headline,
-                "text": f"Seçilen haber: {i}",  # Seçilen haberin index değeri
-                "data": str(i)  # Index'i veri olarak gönderiyoruz
-            })
-
-        # FlexMessage ile başlıkları göndermek
-        flex_message = {
-            "type": "carousel",
-            "contents": [{
+        # FlexMessage için haberleri düzenliyoruz
+        bubbles = []
+        for i in range(len(headlines)):
+            bubble = {
                 "type": "bubble",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": f"Haber {i+1}",
+                            "weight": "bold",
+                            "size": "lg",
+                            "align": "center"
+                        }
+                    ]
+                },
+                "hero": {
+                    "type": "image",
+                    "url": image_urls[i],  # Haber görsel URL'si
+                    "size": "full",
+                    "aspect_ratio": "20:13",
+                    "aspect_mode": "cover"
+                },
                 "body": {
                     "type": "box",
                     "layout": "vertical",
-                    "contents": [{
-                        "type": "button",
-                        "action": button
-                    } for button in buttons]
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": headlines[i],  # Haber başlığı
+                            "weight": "bold",
+                            "size": "md",
+                            "wrap": True
+                        },
+                        {
+                            "type": "text",
+                            "text": "Detaylar için düğmeye tıklayın.",
+                            "size": "sm",
+                            "color": "#999999",
+                            "wrap": True
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "uri",
+                                "label": "Haberi Oku",
+                                "uri": links[i]  # Haber bağlantısı
+                            },
+                            "style": "primary"
+                        }
+                    ]
                 }
-            }]
+            }
+            bubbles.append(bubble)
+
+        # Carousel mesajı oluşturma
+        carousel = {
+            "type": "carousel",
+            "contents": bubbles
         }
 
-        # Başlıkları gönderiyoruz
-        await line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[FlexSendMessage(alt_text="Haber Başlıkları", contents=flex_message)]  # FlexSendMessage kullanıyoruz
-            )
-        )
-
-        # Kullanıcı bir başlık seçtiğinde, ilgili haberin detaylarını gönderiyoruz
-        selected_index = int(event.message.text.split(": ")[1])  # 'Seçilen haber: 1' formatında alıyoruz
-
-        # Seçilen haberin detaylarını alıyoruz
-        selected_headline = headlines[selected_index]
-        selected_content = contents[selected_index]
-        selected_image_url = image_urls[selected_index]
-
-        # Detayları kullanıcıya gönderiyoruz
+        # Flex Message gönderme
         await line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
                 messages=[
-                    TextMessage(text=selected_headline),
-                    ImageMessage(
-                        original_content_url=selected_image_url,
-                        preview_image_url=selected_image_url
-                    ),
-                    TextMessage(text=f"İşte detaylar:\n{selected_content}")
+                    FlexSendMessage(
+                        alt_text="Haber Başlıkları",
+                        contents=carousel
+                    )
                 ]
             )
         )
 
     return 'OK'
+
