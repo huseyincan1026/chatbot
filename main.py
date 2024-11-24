@@ -9,11 +9,11 @@ from linebot.v3.messaging import (
     AsyncMessagingApi,
     Configuration,
     ReplyMessageRequest,
-    TextMessage,
-    FlexSendMessage
+    TextMessage
 )
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.messaging.models import FlexSendMessage
 
 # Kanal sırrı ve kanal erişim token'ını çevresel değişkenlerden alıyoruz
 channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
